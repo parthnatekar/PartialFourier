@@ -21,24 +21,24 @@ class PartialFourier:
 			self.image_file = T.to_tensor(self.image_file)
 		else:
 			self.image_file = np.array(self.image_file)
-		print(self.image_file.shape)
 
 	def getFourier(self, image):
 		if self.mode == 'fastmri':
 			return fastmri.fft2c(image)
 		else:
-			return fft2(image)
+			return fftshift(fft2(fftshift(image)))
 
 	def getFourierInverse(self, k_image):
 		if self.mode == 'fastmri':
 			return fastmri.ifft2c(k_image)
 		else:
-			return ifft2(k_image)
+			return ifftshift(ifft2(ifftshift(k_image)))
 
-	def maskFourier(self, k_image):
+	def maskFourier(self, k_image, mode='complex_conjugate'):
 		masked_k_image = k_image.copy()
-		if self.mode == 'fastmri':
-			masked_k_image[:, 320:, :, :] = torch.flip(masked_k_image[:, :320, :, :], [0])
+
+		if mode == 'zero_fill':
+			masked_k_image[:, masked_k_image.shape[1]//2, :] = 0.
 		else:
 			for i in range(1, masked_k_image.shape[1]//2):
 				for j in range(-masked_k_image.shape[2]//2 + 1, masked_k_image.shape[2]//2):
@@ -53,19 +53,24 @@ class PartialFourier:
 		plt.imshow(slice_image_abs, cmap='Greys_r')
 		plt.show()
 
+	def getPartialFourier(self, image):
+		fourier = self.getFourier(image)
+		masked_fourier = self.maskFourier(fourier, mode='zero_fill')
+		reconstructed = self.getFourierInverse(masked_fourier)
+		return reconstructed, self.getDifference(image, reconstructed)
+
+	def getDifference(self, image1, image2):
+		return image1 - image2, np.linalg.norm(image1 - image2)
+
 if __name__ == '__main__':
 	P = PartialFourier('/media/parth/DATA/datasets/fastMRI/singlecoil_challenge/file1000054.h5', 
 					   mode = 'numpy')
-	reconstructed = np.real(P.getFourierInverse(P.image_file))
-	# P.plot(reconstructed[15])
-	reconstructed_fourier = P.getFourier(reconstructed)
-	print(reconstructed_fourier[15, 320+10, 184+10], reconstructed_fourier[15, 320-10, 184-10])
-	# print(fftshift(reconstructed_fourier, [-2, -1]))
-	masked_fourier = P.maskFourier(reconstructed_fourier)
-	plt.imshow(np.abs(reconstructed_fourier[15] - masked_fourier[15]))
-	plt.show()
-	print(masked_fourier[15, 320+10, 184+10], masked_fourier[15, 320-10, 184-10])
-	reconstructed_real = P.getFourierInverse(masked_fourier)
-	# print(np.where(reconstructed_real != reconstructed))
-	print(np.linalg.norm(reconstructed-reconstructed_real))
-	P.plot(reconstructed_real[15])
+	image = P.getFourierInverse(P.image_file)
+	real_image = np.real(image)
+
+	reconstructed_image, diff = P.getPartialFourier(image)
+	reconstructed_real_image, real_diff = P.getPartialFourier(real_image)
+	
+	print(diff[1], real_diff[1])
+
+	P.plot(diff[0][15])
