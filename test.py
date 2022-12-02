@@ -7,7 +7,6 @@ import torch
 import sys
 sys.path.append('/home/parth/Projects/UCSD/Medical_Imaging/fastMRI')
 import fastmri
-from scipy.signal import hann
 # from fastmri.fftc import *
 # from fastmri.data import transforms as T
 
@@ -49,14 +48,31 @@ class PartialFourier:
 		return masked_k_image
 
 	def getHomodyne(self, k_image, p):
-		symmetric_window = int((0.5-p)*k_image.shape[1]) + 1
+		homodyne_filter = np.ones(k_image.shape, dtype=np.complex_)
 
-		homodyne_filter = np.ones(k_image.shape)
-
-		homodyne_filter[:, :k_image.shape[1]//2-symmetric_window] = 2.
-		homodyne_filter[:, k_image.shape[1]//2+symmetric_window:] = 0.
+		homodyne_filter[:, :(int(p*k_image.shape[1])), :] = 2.
+		homodyne_filter[:, (int((1-p)*k_image.shape[1]) + 1):, :] = 0.
 
 		return k_image*homodyne_filter
+
+	def getPhase(self, k_image, p):
+		phase = k_image.copy()
+
+		phase[:, :(int(p*k_image.shape[1])), :] = 0. + 0j
+
+		def hann(N, k_image):
+			window = k_image.copy()
+			window[:, k_image.shape[1]//2-N//2:k_image.shape[1]//2+N//2, :] = np.repeat(np.repeat(0.5*(1-np.cos(np.conjugate(2*np.pi*np.arange(0, N))/(N)))[None, ..., None], 
+																							 k_image.shape[0], axis=0), k_image.shape[2], axis=2)
+			return window
+
+		hann_window = hann(int(p*k_image.shape[1]), phase)
+		
+		phase = phase * hann_window
+
+		phase = np.exp(-1j * np.angle(self.getFourierInverse(phase)))
+
+		return phase
 
 	def plot(self, image):
 		if self.mode == 'fastmri':
@@ -69,25 +85,18 @@ class PartialFourier:
 	def getPartialFourier(self, image, p=0.4, mode='complex_conjugate'):
 		fourier = self.getFourier(image)
 		masked_fourier = self.maskFourier(fourier, p=p, mode=mode)
+		# plt.imshow(np.abs(fourier[15]) - np.abs(masked_fourier[15]))
+		# plt.colorbar()
+		# plt.show()
 		reconstructed = self.getFourierInverse(masked_fourier)
 		if mode == 'homodyne':
 			phase = self.getPhase(masked_fourier, p)
-			reconstructed = np.real(np.conjugate(phase) * reconstructed)
+			# reconstructed = np.real(phase * reconstructed)
+			# reconstructed[reconstructed < 0.] = 0.
 		return reconstructed, self.getDifference(image, reconstructed)
 
 	def getDifference(self, image1, image2):
 		return image1 - image2, np.linalg.norm(image1 - image2)
-
-	def getPhase(self, k_image, p):
-		symmetric_window = int((0.5-p)*k_image.shape[1]) + 1
-
-		phase = np.zeros(k_image.shape, dtype=np.complex_)
-		phase[:, k_image.shape[1]//2-symmetric_window:k_image.shape[1]//2+symmetric_window, :] = \
-		k_image[:, k_image.shape[1]//2-symmetric_window:k_image.shape[1]//2+symmetric_window, :] 
-		
-		phase = np.exp(1j * np.angle(self.getFourierInverse(phase)))
-
-		return phase
 
 if __name__ == '__main__':
 	P = PartialFourier('/media/parth/DATA/datasets/fastMRI/singlecoil_challenge/file1000054.h5', 
@@ -96,10 +105,11 @@ if __name__ == '__main__':
 	real_image = np.real(image)
 
 	mode = 'homodyne'
+	proportion = 0.4
 
-	reconstructed_image, diff = P.getPartialFourier(image, mode = mode)
-	reconstructed_real_image, real_diff = P.getPartialFourier(real_image, mode=mode)
+	reconstructed_image, diff = P.getPartialFourier(image, p = proportion, mode = mode)
+	reconstructed_real_image, real_diff = P.getPartialFourier(real_image, p = proportion, mode=mode)
 	
 	print(diff[1], real_diff[1])
 
-	P.plot(real_diff[0][15])
+	P.plot(diff[0][15])
