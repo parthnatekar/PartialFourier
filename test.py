@@ -7,6 +7,7 @@ import torch
 import sys
 sys.path.append('/home/parth/Projects/UCSD/Medical_Imaging/fastMRI')
 import fastmri
+import nibabel as nib
 # from fastmri.fftc import *
 # from fastmri.data import transforms as T
 
@@ -14,13 +15,18 @@ class PartialFourier:
 
 	def __init__(self, filepath, mode='fastmri'):
 		self.mode = mode
-
-		with h5py.File(filepath, "r") as hf:
-			self.image_file = np.array(hf["kspace"][()])
-		if self.mode == 'fastmri':
-			self.image_file = T.to_tensor(self.image_file)
+		print(filepath)
+		if filepath.endswith('.h5'):
+			with h5py.File(filepath, "r") as hf:
+				self.image_file = np.array(hf["kspace"][()])
+			if self.mode == 'fastmri':
+				self.image_file = T.to_tensor(self.image_file)
+			else:
+				self.image_file = np.array(self.image_file)
 		else:
-			self.image_file = np.array(self.image_file)
+			nib_image = nib.load(filepath)
+			self.image_file = self.getFourier(nib_image.get_fdata().transpose(2, 0, 1))
+		
 
 	def getFourier(self, image, axes = [-2, -1]):
 		if self.mode == 'fastmri':
@@ -107,8 +113,8 @@ class PartialFourier:
 		diff = np.inf
 		iter_ = 0
 
-		plt.imshow(np.abs(phs[15]))
-		plt.show()
+		# plt.imshow(np.abs(phs[15]))
+		# plt.show()
 
 		while (diff > 1e-7 and iter_ < 100):
 			tmp = img_pocs
@@ -126,12 +132,12 @@ class PartialFourier:
 		return img_pocs
 
 if __name__ == '__main__':
-	P = PartialFourier('/media/parth/DATA/datasets/fastMRI/singlecoil_challenge/file1000078.h5', 
+	P = PartialFourier('/media/parth/DATA/datasets/fastMRI/singlecoil_challenge/file1001682.h5', 
 					   mode = 'numpy')
 	image = P.getFourierInverse(P.image_file)
 	real_image = np.real(image)
 
-	mode = 'POCS'
+	mode = 'zero-filling'
 	proportion = 0.25
 
 	reconstructed_image, diff = P.getPartialFourier(image, p = proportion, mode = mode)
