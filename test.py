@@ -22,17 +22,17 @@ class PartialFourier:
 		else:
 			self.image_file = np.array(self.image_file)
 
-	def getFourier(self, image):
+	def getFourier(self, image, axes = [-2, -1]):
 		if self.mode == 'fastmri':
 			return fastmri.fft2c(image)
 		else:
-			return fftshift(fft2(fftshift(image)))
+			return fftshift(fft2(fftshift(image, axes)), axes)
 
-	def getFourierInverse(self, k_image):
+	def getFourierInverse(self, k_image, axes = [-2, -1]):
 		if self.mode == 'fastmri':
 			return fastmri.ifft2c(k_image)
 		else:
-			return ifftshift(ifft2(ifftshift(k_image)))
+			return ifftshift(ifft2(ifftshift(k_image, axes)), axes)
 
 	def maskFourier(self, k_image, p = 0.3, mode='complex_conjugate'):
 		masked_k_image = k_image.copy()
@@ -66,11 +66,11 @@ class PartialFourier:
 																							 k_image.shape[0], axis=0), k_image.shape[2], axis=2)
 			return window
 
-		hann_window = hann(int(p*k_image.shape[1]), phase)
+		# hann_window = hann(int(p*k_image.shape[1]), phase)
 		
-		phase = phase * hann_window
+		phase = phase
 
-		phase = np.exp(-1j * np.angle(self.getFourierInverse(phase)))
+		phase = np.exp(1j * np.angle(self.getFourierInverse(phase)))
 
 		return phase
 
@@ -91,25 +91,52 @@ class PartialFourier:
 		reconstructed = self.getFourierInverse(masked_fourier)
 		if mode == 'homodyne':
 			phase = self.getPhase(masked_fourier, p)
-			# reconstructed = np.real(phase * reconstructed)
-			# reconstructed[reconstructed < 0.] = 0.
+			reconstructed = np.real(np.conjugate(phase) * reconstructed)
+			reconstructed[reconstructed < 0.] = 0.
+		elif mode == 'POCS':
+			reconstructed = self.POCS(masked_fourier, p)
 		return reconstructed, self.getDifference(image, reconstructed)
 
 	def getDifference(self, image1, image2):
 		return image1 - image2, np.linalg.norm(image1 - image2)
 
+	def POCS(self, k_image, p):
+		ref = k_image.copy()
+		phs = self.getPhase(k_image, p)
+		img_pocs = np.zeros(k_image.shape, dtype=np.complex_)
+		diff = np.inf
+		iter_ = 0
+
+		plt.imshow(np.abs(phs[15]))
+		plt.show()
+
+		while (diff > 1e-7 and iter_ < 100):
+			tmp = img_pocs
+			tmp = self.getFourier(tmp)
+			tmp[:, :(int((1-p)*k_image.shape[1]) + 1), :] = ref[:, :(int((1-p)*k_image.shape[1]) + 1),:]
+			tmp = np.abs(self.getFourierInverse(tmp))*phs
+
+			# tmp = np.real(tmp)
+			# tmp[tmp < 0.] = 0.
+
+			diff = np.linalg.norm(tmp - img_pocs)/np.linalg.norm(img_pocs)
+			print(diff)
+			img_pocs = tmp
+			iter_ = iter_ + 1;
+		return img_pocs
+
 if __name__ == '__main__':
-	P = PartialFourier('/media/parth/DATA/datasets/fastMRI/singlecoil_challenge/file1000054.h5', 
+	P = PartialFourier('/media/parth/DATA/datasets/fastMRI/singlecoil_challenge/file1000078.h5', 
 					   mode = 'numpy')
 	image = P.getFourierInverse(P.image_file)
 	real_image = np.real(image)
 
-	mode = 'homodyne'
-	proportion = 0.4
+	mode = 'POCS'
+	proportion = 0.25
 
 	reconstructed_image, diff = P.getPartialFourier(image, p = proportion, mode = mode)
 	reconstructed_real_image, real_diff = P.getPartialFourier(real_image, p = proportion, mode=mode)
 	
 	print(diff[1], real_diff[1])
 
-	P.plot(diff[0][15])
+	P.plot(reconstructed_image[15])
